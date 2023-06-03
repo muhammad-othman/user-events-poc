@@ -1,4 +1,5 @@
 var amqp = require("amqplib/callback_api");
+var { MongoClient } = require('mongodb');
 
 const EventType = {
   Created: 0,
@@ -6,6 +7,10 @@ const EventType = {
   Deleted: 2
 };
 
+
+var mongoUri = "mongodb://localhost:27017/";
+var usersCollection = new MongoClient(mongoUri)
+  .db("notificationservicedb").collection("users");
 
 
 amqp.connect('amqp://45.63.116.153:5672', function (error, connection) {
@@ -42,6 +47,19 @@ amqp.connect('amqp://45.63.116.153:5672', function (error, connection) {
   function processUserEvent(userEvent) {
     console.log("Processing User Event")
     console.log(userEvent);
+
+    var userData = {
+      _id: userEvent.userData.id,
+      name: userEvent.userData.name,
+      email: userEvent.userData.email,
+    };
+
+    if (userEvent.type == EventType.Created)
+      usersCollection.insertOne(userData);
+    if (userEvent.type == EventType.Updated)
+      usersCollection.updateOne({ '_id': userData._id }, { $set: userData });
+    if (userEvent.type == EventType.Deleted)
+      usersCollection.deleteOne({ '_id': userData._id });
   }
 
 });

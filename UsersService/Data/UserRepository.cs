@@ -35,6 +35,7 @@ namespace UsersService.Data
             var userEvent = new UserEvent
             {
                 Type = EventType.Created,
+                UserData = user,
             };
             PublishEvent(userEvent);
             return user;
@@ -53,6 +54,7 @@ namespace UsersService.Data
             var userEvent = new UserEvent
             {
                 Type = EventType.Deleted,
+                UserData = userToDelete,
             };
             PublishEvent(userEvent);
         }
@@ -78,6 +80,7 @@ namespace UsersService.Data
             var userEvent = new UserEvent
             {
                 Type = EventType.Updated,
+                UserData = userToUpdate,
             };
             PublishEvent(userEvent);
 

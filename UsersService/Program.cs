@@ -11,9 +11,6 @@ builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
-builder.Services.AddDbContext<ApplicationDBContext>(
-    options => options.UseSqlServer("Server=.;Database=UsersServiceDB;Trusted_Connection=True;Encrypt=False;"), ServiceLifetime.Singleton);
-
 var app = builder.Build();
 
 // Configure the HTTP request pipeline.

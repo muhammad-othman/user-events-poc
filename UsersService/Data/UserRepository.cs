@@ -1,4 +1,5 @@
 ﻿using Microsoft.EntityFrameworkCore;
+using MongoDB.Driver;
 using RabbitMQ.Client;
 using System.Text;
 using System.Text.Json;
@@ -7,12 +8,17 @@ namespace UsersService.Data
 {
     public class UserRepository : IUserRepository
     {
-        private readonly ApplicationDBContext context;
+        private readonly IMongoCollection<UserEvent> userEventsCollection;
         private readonly IModel rabbitmqModel;
 
-        public UserRepository(ApplicationDBContext context)
+        private List<User> usersList = new List<User>();
+
+        public UserRepository()
         {
-            this.context = context;
+            var dbClient = new MongoClient("mongodb://127.0.0.1:27017");
+            var db = dbClient.GetDatabase("usersEventSourcingDB");
+
+            userEventsCollection = db.GetCollection<UserEvent>("usersEvents");
 
             var factory = new ConnectionFactory();
 
@@ -26,65 +32,48 @@ namespace UsersService.Data
             rabbitmqModel = connection.CreateModel();
             rabbitmqModel.ExchangeDeclare("usersbus", ExchangeType.Fanout, true);
 
+            ReprocessUserEvents();
+
         }
+
+
         public async Task<User> Add(User user)
         {
-            context.Add<User>(user);
-            await context.SaveChangesAsync();
-
             var userEvent = new UserEvent
             {
                 Type = EventType.Created,
                 UserData = user,
             };
-            PublishEvent(userEvent);
+            await SaveAndProcessEvents(userEvent);
             return user;
         }
 
-        public async Task Delete(int id)
+        public async Task Delete(Guid id)
         {
-
-            var userToDelete = await context.Users.FindAsync(id);
-            if (userToDelete == null)
-                throw new Exception("User not found");
-
-            context.Users.Remove(userToDelete);
-            await context.SaveChangesAsync();
-
+            var userToDelete = usersList.First(u => u.Id == id);
             var userEvent = new UserEvent
             {
                 Type = EventType.Deleted,
                 UserData = userToDelete,
             };
-            PublishEvent(userEvent);
+            await SaveAndProcessEvents(userEvent);
         }
 
         public async Task<List<User>> GetAll()
         {
-            return await context.Users.ToListAsync();
+            return usersList;
         }
 
         public async Task<User> Update(User user)
         {
-            var userToUpdate = await context.Users.FindAsync(user.Id);
-            if (userToUpdate == null)
-                throw new Exception("User not found");
-
-            userToUpdate.Name = user.Name;
-            userToUpdate.Email = user.Email;
-            userToUpdate.BirthDate = user.BirthDate;
-            userToUpdate.Address = user.Address;
-
-            await context.SaveChangesAsync();
-
             var userEvent = new UserEvent
             {
                 Type = EventType.Updated,
-                UserData = userToUpdate,
+                UserData = user,
             };
-            PublishEvent(userEvent);
+            await SaveAndProcessEvents(userEvent);
 
-            return userToUpdate;
+            return user;
         }
 
         private void PublishEvent(UserEvent userEvent) 
@@ -96,6 +85,47 @@ namespace UsersService.Data
             var body = Encoding.UTF8.GetBytes(jsonEvent);
 
             rabbitmqModel.BasicPublish("usersbus", "", null, body);
+        }
+
+        private async Task SaveAndProcessEvents(UserEvent userEvent)
+        {
+            await userEventsCollection.InsertOneAsync(userEvent);
+            ProcessUserEvent(userEvent);
+            PublishEvent(userEvent);
+        }
+
+        private void ProcessUserEvent(UserEvent userEvent)
+        {
+            switch (userEvent.Type)
+            {
+                case EventType.Created:
+                    usersList.Add(userEvent.UserData);
+                    break;
+                case EventType.Updated:
+                    var oldUser = usersList.First(u => u.Id == userEvent.UserData.Id);
+                    oldUser.Name = userEvent.UserData.Name;
+                    oldUser.Email = userEvent.UserData.Email;
+                    oldUser.BirthDate = userEvent.UserData.BirthDate;
+                    oldUser.Address = userEvent.UserData.Address;
+                    break;
+                case EventType.Deleted:
+                    usersList.RemoveAll(u => u.Id == userEvent.UserData.Id);
+                    break;
+            }
+        }
+
+
+        private async Task ReprocessUserEvents()
+        {
+            var eventsCollection = userEventsCollection.Find(_ => true).SortBy(e => e.CreatedAt);
+
+            var eventsList = await eventsCollection.ToListAsync();
+            usersList = new List<User>();
+
+            foreach (var userEvent in eventsList)
+            {
+                ProcessUserEvent(userEvent);
+            }
         }
     }
 }

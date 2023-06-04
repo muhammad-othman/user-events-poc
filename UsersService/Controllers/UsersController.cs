@@ -38,7 +38,7 @@ namespace UsersService.Controllers
 
 
         [HttpDelete]
-        public async Task<IActionResult> Delete(int id)
+        public async Task<IActionResult> Delete(Guid id)
         {
             await userRepository.Delete(id);
             return Ok();
